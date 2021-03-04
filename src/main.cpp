@@ -154,6 +154,12 @@ void disarm_and_sleep() {
 }
 
 IRAM_ATTR void preAlarmReset() {
+
+  if(digitalRead(ADXL362_INT) == HIGH) {
+    log_i("Movement is still detected, not disarming");
+    return;
+  }
+
   alarmState = ARMED;
   log_i("No more movement detected, ending pre-alarm");
 }
@@ -225,13 +231,20 @@ void GSM_OFF()
   digitalWrite(MODEM_RST, HIGH);     // Keep IRQ high ? (or not to save power?)
 }
 
+void connectToGSM() {
+  log_i("GSM Power ON");
+  GSM_ON(1000);
+}
+
+void disconnectFromGSM() {
+  
+  log_i("GSM Power OFF");
+  GSM_OFF();
+
+}
+
 void alarmToGSM()
 {  
-  //Begin serial communication with Arduino and SIM800L
-  gsmSerial.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
-
-  GSM_ON(1000);
-
   log_i("Initializing GSM modem");
 
   modem.init();
@@ -246,29 +259,19 @@ void alarmToGSM()
   if (modem.isNetworkConnected()) {
     log_i("Network connected");
   }
-
   log_i("Opening GPRS connection");
   if (!modem.gprsConnect("hologram")) {
     log_e("Failed to start GPRS connection");
     return;
   }
 
-  if (modem.isGprsConnected()) {
-    log_i("GPRS connected");
-  }
-
   client.connect("cloudsocket.hologram.io", 9999);
   client.write("{\"k\":\"G_G#XDW0\",\"d\":\"Alarm\",\"t\":\"ALARM\"}");
   client.stop();
   
-  log_i("Cloud message sent, closing GPRS connection");
+  log_i("Cloud message sent"); 
+
   modem.gprsDisconnect();
-
-  log_i("GSM Radio OFF");
-  modem.radioOff();
-
-  log_i("GSM Power OFF");
-  GSM_OFF();
 }
 
 void setup(void) {
@@ -296,6 +299,9 @@ void setup(void) {
   adiAccelerometer.setMeasurementMode();
   log_i("Accelerometer set up");
 
+  //Begin serial communication with Arduino and SIM800L
+  gsmSerial.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
+
   esp_reset_reason_t reset_reason = esp_reset_reason();
 
   if(reset_reason == ESP_RST_DEEPSLEEP) {
@@ -305,6 +311,7 @@ void setup(void) {
       detectsMovement(); // trigger once
 
       // set up interrupt for subsequent motion triggering while woken up
+      pinMode(ADXL362_INT, INPUT);
       attachInterrupt(ADXL362_INT, detectsMovement, RISING);
     } else if(alarmState == DISARMED) {
       log_i("Waking up from DISARMED state to check if phone still here");
@@ -330,6 +337,7 @@ void loop(void) {
   EasyBuzzer.update();
 
   if(alarmState == ARMED) {
+      disconnectFromGSM();
       arm_and_sleep();
   } else if(alarmState == PREALARM) {
       if(!BLEDevice::getInitialized()) { // TODO - fix using BLE status as a flag for first pre-alarm run
@@ -346,14 +354,17 @@ void loop(void) {
 
         log_i("Starting BLE to wait for unlock code");
         start_ble();
+        connectToGSM();
       }
       
       digitalWrite(LED_GPIO, HIGH);
+
   } else if(alarmState == DISARMED) {
+    disconnectFromGSM();
     disarm_and_sleep();
   } else if(alarmState == ALARM) {
     EasyBuzzer.beep(4000);
     alarmToGSM();
-    // TODO: Re-arm here?
+    alarmState = ARMED;
   } 
 }
