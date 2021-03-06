@@ -340,6 +340,9 @@ void loop(void) {
       disconnectFromGSM();
       arm_and_sleep();
   } else if(alarmState == PREALARM) {
+
+      digitalWrite(LED_GPIO, HIGH);
+
       if(!BLEDevice::getInitialized()) { // TODO - fix using BLE status as a flag for first pre-alarm run
 
         EasyBuzzer.beep(
@@ -357,8 +360,6 @@ void loop(void) {
         connectToGSM();
       }
       
-      digitalWrite(LED_GPIO, HIGH);
-
   } else if(alarmState == DISARMED) {
     disconnectFromGSM();
     disarm_and_sleep();
