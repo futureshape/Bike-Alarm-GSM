@@ -243,7 +243,7 @@ void disconnectFromGSM() {
 
 }
 
-void alarmToGSM()
+void sendCloudMessage(const char *topic, const char *data)
 {  
   log_i("Initializing GSM modem");
 
@@ -265,8 +265,11 @@ void alarmToGSM()
     return;
   }
 
+  String msgString = String("{\"k\":\"G_G#XDW0\",\"d\":\"") + String(data) + String("\",\"t\":\"") + String(topic) + String("\"}");
+  log_i("Sending message %s", msgString.c_str());
+
   client.connect("cloudsocket.hologram.io", 9999);
-  client.write("{\"k\":\"G_G#XDW0\",\"d\":\"Alarm\",\"t\":\"ALARM\"}");
+  client.write(msgString.c_str());
   client.stop();
   
   log_i("Cloud message sent"); 
@@ -365,7 +368,7 @@ void loop(void) {
     disarm_and_sleep();
   } else if(alarmState == ALARM) {
     EasyBuzzer.beep(4000);
-    alarmToGSM();
+    sendCloudMessage("ALARM", "Alarm");
     alarmState = ARMED;
   } 
 }
