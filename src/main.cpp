@@ -82,10 +82,12 @@ enum alarmStates {
   ALARM       // illegitimate movement, send notification
 };
 
+#define uS_TO_S_FACTOR      1000000ULL 
 #define PRE_ALARM_TIMEOUT   10 // How many seconds after first movement to stay awake and check for repeated movement
 #define FULL_ALARM_WAIT     20 // How many seconds of continuous movement to wait until sounding full alarm
 #define REARM_CHECK_PERIOD  30 // How often (in seconds) to wake up and check that the phone is still nearby
 #define REARM_TIMEOUT       15 // How many seconds to wait for phone to connect and provide unlock code before rearming
+#define BATTERY_CHECK_PERIOD 60*60*12 // 12 hrs - How often (in seconds) to wake up from armed state and report battery level to cloud 
 
 // Persists during sleep so we can distinguish between the different reasons for going to sleep
 RTC_DATA_ATTR volatile enum alarmStates alarmState = UNDEFINED;
@@ -143,13 +145,15 @@ void arm_and_sleep() {
   esp_bt_controller_disable();
 
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_15, HIGH);
+  esp_sleep_enable_timer_wakeup(BATTERY_CHECK_PERIOD * uS_TO_S_FACTOR);
+
   esp_deep_sleep_start();  
 }    
 
 void disarm_and_sleep() {
   log_i("Alarm has been disarmed, will go into sleep state and check again later");
 
-  esp_sleep_enable_timer_wakeup(REARM_CHECK_PERIOD * 1000000L);
+  esp_sleep_enable_timer_wakeup(REARM_CHECK_PERIOD * uS_TO_S_FACTOR);
   esp_deep_sleep_start();  
 }
 
@@ -286,8 +290,6 @@ void setup(void) {
   bool isOk = setPowerBoostKeepOn(1);
   log_i("IP5306 KeepOn %s", isOk ? "OK" : "FAIL");
 
-  log_i("Battery level: %d", getBatteryLevel());
-
   EasyBuzzer.setPin(BUZZER_GPIO);
   pinMode(LED_GPIO, OUTPUT);
 
@@ -306,16 +308,33 @@ void setup(void) {
   gsmSerial.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
 
   esp_reset_reason_t reset_reason = esp_reset_reason();
+  esp_sleep_source_t wakeup_source = esp_sleep_get_wakeup_cause();
 
   if(reset_reason == ESP_RST_DEEPSLEEP) {
     if(alarmState == ARMED) {
-      log_i("Waking up from ARMED state because of movement interrupt");
+      if(wakeup_source == ESP_SLEEP_WAKEUP_EXT0) {
+        log_i("Waking up from ARMED state because of movement interrupt");
 
-      detectsMovement(); // trigger once
+        detectsMovement(); // trigger once
 
-      // set up interrupt for subsequent motion triggering while woken up
-      pinMode(ADXL362_INT, INPUT);
-      attachInterrupt(ADXL362_INT, detectsMovement, RISING);
+        // set up interrupt for subsequent motion triggering while woken up
+        pinMode(ADXL362_INT, INPUT);
+        attachInterrupt(ADXL362_INT, detectsMovement, RISING);
+      } else if(wakeup_source == ESP_SLEEP_WAKEUP_TIMER) {
+        log_i("Waking up from ARMED state just to periodically check battery");
+
+        // checking battery after we've enabled the GSM modem 
+        // will probably give a more realistic indication
+        connectToGSM();
+        
+        int8_t batteryLevel = getBatteryLevel();
+        log_i("Battery level: %d", batteryLevel);
+
+        sendCloudMessage("BATTERY", String(batteryLevel).c_str());
+
+        // Alarm stays armed
+        alarmState = ARMED;
+      }
     } else if(alarmState == DISARMED) {
       log_i("Waking up from DISARMED state to check if phone still here");
       alarmState = PREARM;
@@ -330,6 +349,8 @@ void setup(void) {
     EasyBuzzer.singleBeep(2000, 200);
     delay(400);
     EasyBuzzer.singleBeep(4000, 200);
+
+    esp_sleep_enable_timer_wakeup(BATTERY_CHECK_PERIOD * uS_TO_S_FACTOR);
 
     alarmState = ARMED;
   }
