@@ -294,6 +294,9 @@ void setup(void) {
   pinMode(LED_GPIO, OUTPUT);
 
   delay(100);
+  pinMode(ADXL362_INT, INPUT);
+  log_i("!!!! ADXL362_INT %s", digitalRead(ADXL362_INT) ? "ON" : "OFF");
+  
   SPI.begin(ADXL362_SCK, ADXL362_MISO, ADXL362_MOSI, ADXL362_CS);
   adiAccelerometer.begin(ADXL362_CS, &SPI);
   adiAccelerometer.softwareReset();
@@ -318,7 +321,6 @@ void setup(void) {
         detectsMovement(); // trigger once
 
         // set up interrupt for subsequent motion triggering while woken up
-        pinMode(ADXL362_INT, INPUT);
         attachInterrupt(ADXL362_INT, detectsMovement, RISING);
       } else if(wakeup_source == ESP_SLEEP_WAKEUP_TIMER) {
         log_i("Waking up from ARMED state just to periodically check battery");
